@@ -38,8 +38,9 @@ jobs:
           mkdir zipped
           for file in $FILES; do
             name=$(basename "$file" .py)
-            zip_path="zipped/${name}.zip"
-            zip -j "$zip_path" "$file"
+            temp_dir=$(mktemp -d)
+            cp "$file" "$temp_dir/lambda_handler.py"
+            zip -j "zipped/${name}.zip
             aws s3 cp "$zip_path" s3://bloom-dev-data-team/test/DE-176-Deployment-Test/Lambda/"${name}.zip"
           done
 
