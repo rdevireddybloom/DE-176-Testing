@@ -1,0 +1,55 @@
+name: Deploy AWS Lambda Function ZIP to S3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - python/Lambda/**
+
+
+jobs:
+  deploy-lambda:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Detect changed Lambda files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^python/Lambda/.*\.py' || true)
+          echo "FILES=$FILES" >> $GITHUB_ENV
+
+      - name: Package and upload modified Lambda files
+        if: env.FILES != ''
+        run: |
+          mkdir zipped
+          for file in $FILES; do
+            name=$(basename "$file" .py)
+            zip_path="zipped/${name}.zip"
+            zip -j "$zip_path" "$file"
+            aws s3 cp "$zip_path" s3://bloom-dev-data-team/test/DE-176-Deployment-Test/Lambda/"${name}.zip"
+          done
+
+      - name: Teams Notification on Success
+        if: success()
+        run: |
+          curl -H "Content-Type: application/json" -d '{
+            "text": "Lambda deployment succeeded in *${{ github.repository }}*. Modified files have been zipped and uploaded to S3.\n\nModified files:\n'"$FILES"'"
+          }' ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+      - name: Teams Notification on Failure
+        if: failure()
+        run: |
+          curl -H "Content-Type: application/json" -d '{
+            "text": "Lambda deployment failed in *${{ github.repository }}*. Please check the logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }' ${{ secrets.TEAMS_WEBHOOK_URL }}
