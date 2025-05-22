@@ -9,5 +9,6 @@ def lambda_handler(event, context):
     print("edit_Ram2.py")
     print("Nice, the code is deployed")
     print("Nice, the code is deployed as lambda handler function")
+    print("Trying with the new id and secret")
     return 200  # Echo back the first key value
     # raise Exception('Something went wrong')
