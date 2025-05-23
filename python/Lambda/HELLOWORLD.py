@@ -10,6 +10,6 @@ def lambda_handler(event, context):
     print("Nice, the code is deployed")
     print("Nice, the code is deployed as lambda handler function")
     print("Trying with the new iam role id and secret")
-    print("Final Lambda Testing...")
+    print("Final Lambda Testing....")
     return 200  # Echo back the first key value
     # raise Exception('Something went wrong')
