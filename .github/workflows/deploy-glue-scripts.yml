@@ -35,7 +35,7 @@ jobs:
         run: |
           for file in $FILES; do
             name=$(basename "$file")
-            aws s3 cp "$file" s3://bloom-dev-data-team/glue-scripts/"$name"
+            aws s3 cp "$file" s3://bloom-dev-data-scripts/glue/"$name"
           done
 
       - name: Teams Notification on Success
