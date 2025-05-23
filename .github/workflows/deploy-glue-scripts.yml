@@ -1,0 +1,53 @@
+name: Deploy Glue Scripts to S3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - python/Glue/**
+
+jobs:
+  deploy-glue:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+
+      - name: Detect changed Glue files
+        id: detect
+        run: |
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^glue-scripts/.*\.py' || true)
+          echo "FILES=$FILES" >> $GITHUB_ENV
+
+      - name: Upload changed Glue scripts to S3
+        if: env.FILES != ''
+        run: |
+          for file in $FILES; do
+            name=$(basename "$file")
+            aws s3 cp "$file" s3://bloom-dev-data-team/glue-scripts/"$name"
+          done
+
+      - name: Teams Notification on Success
+        if: success()
+        run: |
+          curl -H "Content-Type: application/json" -d '{
+            "text": "Glue script deployment succeeded in *${{ github.repository }}*. Updated scripts have been uploaded to S3."
+          }' ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+      - name: Teams Notification on Failure
+        if: failure()
+        run: |
+          curl -H "Content-Type: application/json" -d '{
+            "text": "Glue script deployment failed in *${{ github.repository }}*. Check logs at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }' ${{ secrets.TEAMS_WEBHOOK_URL }}
