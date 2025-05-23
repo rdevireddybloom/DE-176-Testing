@@ -35,7 +35,7 @@ jobs:
             # Upload latest version
             aws s3 cp "$file" s3://dev-data-scripts/glue/"$name"
             # Upload archived version
-            aws s3 cp "$file" s3://dev-data-scripts/glue/archive/${name}_${timestamp}.py
+            aws s3 cp "$file" s3://dev-data-scripts/archive/glue/${name}_${timestamp}.py
           done
 
       - name: Teams Notification on Success
