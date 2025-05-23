@@ -11,7 +11,7 @@ import logging
 # Get the root logger
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # Set the minimum logging level
-
+print("Logger initialized")
 # Create a StreamHandler to output to stdout
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
