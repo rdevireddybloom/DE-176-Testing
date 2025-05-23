@@ -24,18 +24,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
-      - name: Detect changed Glue files
-        id: detect
+      - name: Upload changed Glue scripts to S3
         run: |
           FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^python/Glue/.*\.py' || true)
-          echo "FILES=$FILES" >> $GITHUB_ENV
-
-      - name: Upload changed Glue scripts to S3
-        if: env.FILES != ''
-        run: |
+          echo "Detected Glue files:"
+          echo "$FILES"
           for file in $FILES; do
             name=$(basename "$file")
-            aws s3 cp "$file" s3://bloom-dev-data-scripts/glue/"$name"
+            aws s3 cp "$file" s3://dev-data-scripts/glue/"$name"
           done
 
       - name: Teams Notification on Success
