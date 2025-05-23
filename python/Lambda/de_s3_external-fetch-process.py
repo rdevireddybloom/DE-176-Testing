@@ -60,7 +60,7 @@ def get_db_connection(secret_name):
             password=secret["password"],  # Database password
             port=secret.get(
                 "port", 5432
-            ),  # Optional port (defaults to 5432 if not provided)
+            ),  # Optional port (defaults to 5432 if not provided).
         )
 
     except Exception as e:

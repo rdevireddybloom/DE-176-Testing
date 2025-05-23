@@ -7,8 +7,8 @@ import sqlalchemy as sa
 import csv
 import logging
 
-# Initialize logging
-# Get the root logger
+# Initialize logging.
+# Get the root logger.
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # Set the minimum logging level
 
@@ -17,22 +17,23 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
 
 # Create a formatter to customize the log message format
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 
 # Add the handler to the logger
 logger.addHandler(handler)
 
 # Few variable initializations
-region_name="us-west-2"
-rs_secret_name = 'prod/dw/Redshift/etluser'
+region_name = "us-west-2"
+rs_secret_name = "prod/dw/Redshift/etluser"
 lookback_num_days = 3
 
-# Create a global AWS client
-sns_client = boto3.client('sns')
+# Create a global AWS client.
+sns_client = boto3.client("sns")
 session = boto3.Session()
-s3_client = session.client('s3')
-secrets_client = session.client(service_name='secretsmanager', region_name=region_name)
+s3_client = session.client("s3")
+secrets_client = session.client(service_name="secretsmanager", region_name=region_name)
+
 
 # Function for publishing messages to the AWS SNS service.
 def publish_message(topic, message, email_subject):
@@ -45,23 +46,29 @@ def publish_message(topic, message, email_subject):
     :return: The ID of the message
     """
     try:
-        response = sns_client.publish(TopicArn=topic, Message=message, Subject=email_subject)
-        message_id = response['MessageId']
+        response = sns_client.publish(
+            TopicArn=topic, Message=message, Subject=email_subject
+        )
+        message_id = response["MessageId"]
         return message_id
     except Exception as e:
         logger.error(f"Failed to publish message to {topic}: {e}")
         raise
 
+
 def retrieve_secrets(secret_name):
     """Retrieve secrets from AWS Secrets Manager."""
     try:
-        get_secret_value_response = secrets_client.get_secret_value(SecretId=secret_name)
-        secret_json = json.loads(get_secret_value_response['SecretString'])
+        get_secret_value_response = secrets_client.get_secret_value(
+            SecretId=secret_name
+        )
+        secret_json = json.loads(get_secret_value_response["SecretString"])
         logger.info(f"Successfully retrieved secrets for {secret_name}")
         return secret_json
     except Exception as e:
         logger.error(f"Failed to retrieve secrets for {secret_name}: {e}")
         raise
+
 
 def create_db_connection(secret_json):
     """Create a database connection using the provided secrets."""
@@ -71,27 +78,31 @@ def create_db_connection(secret_json):
             password=secret_json["password"],
             host=secret_json["host"],
             port=secret_json["port"],
-            database=secret_json["dbname"]
+            database=secret_json["dbname"],
         )
-        logger.info(f"Successfully created database connection to {secret_json['dbname']}")
+        logger.info(
+            f"Successfully created database connection to {secret_json['dbname']}"
+        )
         return conn
     except Exception as e:
         logger.error(f"Failed to create database connection: {e}")
         raise
-    
+
 
 logger.info(f"Sys.argv settings for this run: {sys.argv}")
 
 try:
     # Retrieve secrets
     rs_secret_json = retrieve_secrets(rs_secret_name)
-    
+
     # Create RS database connections
     rs_conn = create_db_connection(rs_secret_json)
     rs_cursor = rs_conn.cursor()
-    
-    new_count_sql_to_run = "select count(*) from integrated_ccs.AgentStats where StatsDate = "
-    
+
+    new_count_sql_to_run = (
+        "select count(*) from integrated_ccs.AgentStats where StatsDate = "
+    )
+
     raw_sql_to_run = """select CASE WHEN a.UsersFK > 0 then a.UsersFK else 0 end                           as UsersFK,
                                CASE WHEN a.UsersFK > 0 THEN u.Name ELSE 'Amcat Engine' END                 as Name,
                                PauseTime,
@@ -145,7 +156,7 @@ try:
                                  LEFT JOIN integrated_ccs.Reasons rr on a.LogoutReasonFK = rr.PKReason
                                  LEFT JOIN integrated_ccs.EmailProjects e on a.ProjectType = 3 and a.CampaignFK = e.PKEmailProject
                         where a.statsdate::date = """
-                        
+
     summarized_sql_to_run = """Select A.UsersFK,
              A.Name,
              A.ProjectName,
@@ -163,71 +174,107 @@ try:
                , A.ProjectName
                , A.StatsDate
                , A.HourOfCall"""
-    
+
     for i in range(lookback_num_days, 0, -1):
-    
-        new_count = 0 
+
+        new_count = 0
         existing_raw_count = 0
         existing_summarized_count = 0
-        
-        lookback_clause = "current_date - " + str(i)  
-        
-        # check counts for date being added. 
+
+        lookback_clause = "current_date - " + str(i)
+
+        # check counts for date being added.
         rs_cursor.execute(new_count_sql_to_run + lookback_clause)
         count_results = rs_cursor.fetchone()
         new_count = count_results[0]
 
-        # check counts for existing data for that date 
-        rs_cursor.execute("select count(*) from dm_analytics.agentlogtime_raw where statsdate::date = " + lookback_clause)
+        # check counts for existing data for that date
+        rs_cursor.execute(
+            "select count(*) from dm_analytics.agentlogtime_raw where statsdate::date = "
+            + lookback_clause
+        )
         count_results = rs_cursor.fetchone()
         existing_raw_count = count_results[0]
-        
-        rs_cursor.execute("select count(*) from dm_analytics.agentlogtime_summarized where statsdate::date = " + lookback_clause)
+
+        rs_cursor.execute(
+            "select count(*) from dm_analytics.agentlogtime_summarized where statsdate::date = "
+            + lookback_clause
+        )
         count_results = rs_cursor.fetchone()
         existing_summarized_count = count_results[0]
 
         # if existing count > new count:  send alert and leave existing as is for  now
         if existing_raw_count > new_count:
-            # send alert to SNS topic. 
+            # send alert to SNS topic.
             error_email_subject = "Analytics DM build Alert"
-            error_message_to_send = "Alert occurred in: analytics_dm_builder glue job.  \
-                Existing rec count > Update rec count for lookback of " + str(i) + "days!!"
+            error_message_to_send = (
+                "Alert occurred in: analytics_dm_builder glue job.  \
+                Existing rec count > Update rec count for lookback of "
+                + str(i)
+                + "days!!"
+            )
             sns_topic = "arn:aws:sns:us-west-2:511539536780:Glue-Error-Messages"
-            msg_id = publish_message(sns_topic, error_message_to_send, error_email_subject)
-            
+            msg_id = publish_message(
+                sns_topic, error_message_to_send, error_email_subject
+            )
+
         else:
             if new_count == 0:
                 # send alert to SNS topic about missing data
                 # And do not update anything with existing
                 error_email_subject = "Analytics DM build Alert"
-                error_message_to_send = "Alert occurred in: analytics_dm_builder glue job.  \
-                    New record count of 0 for lookback of " + str(i) + "days!!"
+                error_message_to_send = (
+                    "Alert occurred in: analytics_dm_builder glue job.  \
+                    New record count of 0 for lookback of "
+                    + str(i)
+                    + "days!!"
+                )
                 sns_topic = "arn:aws:sns:us-west-2:511539536780:Glue-Error-Messages"
                 # msg_id = publish_message(sns_topic, error_message_to_send, error_email_subject)
-                
+
             else:
                 if existing_raw_count > 0:
                     # remove raw data
-                    logger.info("Existing raw records found for lookback " + str(i) + ":  deleting")
-                    rs_cursor.execute("delete from dm_analytics.agentlogtime_raw where statsdate::date = " + lookback_clause)
+                    logger.info(
+                        "Existing raw records found for lookback "
+                        + str(i)
+                        + ":  deleting"
+                    )
+                    rs_cursor.execute(
+                        "delete from dm_analytics.agentlogtime_raw where statsdate::date = "
+                        + lookback_clause
+                    )
                 if existing_summarized_count > 0:
                     # remove summarized data
-                    logger.info("Existing summarized records found for lookback " + str(i) + ":  deleting")
-                    rs_cursor.execute("delete from dm_analytics.agentlogtime_summarized where statsdate::date = " + lookback_clause)
-                
+                    logger.info(
+                        "Existing summarized records found for lookback "
+                        + str(i)
+                        + ":  deleting"
+                    )
+                    rs_cursor.execute(
+                        "delete from dm_analytics.agentlogtime_summarized where statsdate::date = "
+                        + lookback_clause
+                    )
+
                 # insert new raw data
                 logger.info("Inserting new raw recs for lookback " + str(i))
-                rs_cursor.execute("insert into dm_analytics.agentlogtime_raw \
-                        " + raw_sql_to_run + lookback_clause)
-                
+                rs_cursor.execute(
+                    "insert into dm_analytics.agentlogtime_raw \
+                        "
+                    + raw_sql_to_run
+                    + lookback_clause
+                )
+
                 # insert new summarized
                 logger.info("Inserting new summarized recs for lookback " + str(i))
-                rs_cursor.execute("insert into dm_analytics.agentlogtime_summarized \
-                        " + summarized_sql_to_run.replace('###REPLACE###',lookback_clause))
-                        
+                rs_cursor.execute(
+                    "insert into dm_analytics.agentlogtime_summarized \
+                        "
+                    + summarized_sql_to_run.replace("###REPLACE###", lookback_clause)
+                )
+
                 rs_conn.commit()
-                
-                
+
     step1_sql_to_run = """delete from integrated_ccs.bloom_vwcallstats where date(callstarttime) >= current_date - 3;
         insert into integrated_ccs.Bloom_vwCallStats
         select PKCallResults,c.AgentExitCode as CallResultCode, m.CallResultDescription,
@@ -471,7 +518,7 @@ try:
         LEFT JOIN prod.integrated_ccs.EmailBoxes eb ON c.EmailFK is not null and c.ProjectType = 3 and em.MailBoxFK = eb.PKMailBox
         LEFT JOIN prod.integrated_ccs.CallComments cc ON c.commentfk = cc.pkcomment
         where date(c.callstarttime) >= current_date - 3;"""
-        
+
     step2_sql_to_run = """delete from dm_analytics.ccs_enrollments_raw where date(dateofcall) >= current_date - 3;
         insert into dm_analytics.ccs_enrollments_raw
             SELECT distinct
@@ -522,7 +569,7 @@ try:
         WHERE bcs.AgentFK NOT IN ( 971, 1511, 1052, 2454 ) --- Conditions to exclude older data
         AND bcs.CallResultDescription NOT LIKE '%Test%' -- Exclude Test Calls;
         and date(bcs.dateofcall) >= current_date - 3;"""
-    
+
     step3_sql_to_run = """delete from dm_analytics.aqe_enrollments_raw where planyear >= 2025;
         insert into dm_analytics.aqe_enrollments_raw
             SELECT distinct
@@ -630,7 +677,7 @@ try:
                 ON QQ.confirmationid = e.confirmationid
                    AND QQ.carrier_id = e.carrier_id
         where e.planyear >= 2025;"""
-        
+
     step4_sql_to_run = """update dm_analytics.aqe_enrollments_raw
             set both_aqe_and_ccs_enrollment = false
             where both_aqe_and_ccs_enrollment = true;
@@ -668,7 +715,7 @@ try:
             where ccs_enrollments_raw.client = d.client
                 and ccs_enrollments_raw.enrollmentid = d.enrollmentid
                 and ccs_enrollments_raw.dateofcall = d.dateofcall;"""
-                
+
     step5_sql_to_run = """update dm_analytics.ccs_enrollments_raw
             set ccs_duplicate_flag = false
             where ccs_duplicate_flag = true;
@@ -682,39 +729,45 @@ try:
             where ccs_enrollments_raw.enrollmentid = k.enrollmentid and ccs_enrollments_raw.bloomenrollmentid = k.bloomenrollmentid
                 and ccs_enrollments_raw.dateofcall != k.keep_dateofcall;"""
 
-    logger.info("Running step 1 of enrollment dm build:  integrated_ccs.bloom_vwcallstats")
+    logger.info(
+        "Running step 1 of enrollment dm build:  integrated_ccs.bloom_vwcallstats"
+    )
     rs_cursor.execute(step1_sql_to_run)
-    rs_conn.commit();
-    
-    logger.info("Running step 2 of enrollment dm build:  dm_analytics.ccs_enrollments_raw")
+    rs_conn.commit()
+
+    logger.info(
+        "Running step 2 of enrollment dm build:  dm_analytics.ccs_enrollments_raw"
+    )
     rs_cursor.execute(step2_sql_to_run)
-    rs_conn.commit();
-    
-    logger.info("Running step 3 of enrollment dm build:  dm_analytics.aqe_enrollments_raw")
+    rs_conn.commit()
+
+    logger.info(
+        "Running step 3 of enrollment dm build:  dm_analytics.aqe_enrollments_raw"
+    )
     rs_cursor.execute(step3_sql_to_run)
-    rs_conn.commit();
-    
+    rs_conn.commit()
+
     logger.info("Running step 4 of enrollment dm build:  set duplication flag")
     rs_cursor.execute(step4_sql_to_run)
-    rs_conn.commit();
-    
+    rs_conn.commit()
+
     logger.info("Running step 5 of enrollment dm build:  set ccs duplication flag")
     rs_cursor.execute(step5_sql_to_run)
-    rs_conn.commit();
-                    
+    rs_conn.commit()
+
     rs_conn.close()
-    
+
     logger.info("Job Complete")
 
 except Exception as error:
-    
+
     # If connections open, rollback and close
     if rs_conn:
         rs_conn.rollback()
         rs_cursor.close()
         rs_conn.close()
         logger.error("Redshift connection is closed")
-    
+
     # Send ERROR notification to SNS topic
     error_email_subject = "DW Source Copy data process error"
     error_message_to_send = "Exception occurred in: analytics_dm_builder glue job"
