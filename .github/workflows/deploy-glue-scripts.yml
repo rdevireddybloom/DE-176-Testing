@@ -31,7 +31,11 @@ jobs:
           echo "$FILES"
           for file in $FILES; do
             name=$(basename "$file")
-            aws s3 cp "$file" s3://bloom-dev-data-scripts/glue/"$name"
+            timestamp=$(date -u +"%Y%m%dT%H%M%SZ")
+            # Upload latest version
+            aws s3 cp "$file" s3://dev-data-scripts/glue/"$name"
+            # Upload archived version
+            aws s3 cp "$file" s3://dev-data-scripts/glue/archive/${name}_${timestamp}.py
           done
 
       - name: Teams Notification on Success
