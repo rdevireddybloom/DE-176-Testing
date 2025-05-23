@@ -25,16 +25,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
-      - name: Detect changed Lambda files
-        id: changed
+      - name: Package and upload modified Lambda files
         run: |
           FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^python/Lambda/.*\.py' || true)
-          echo "FILES=$FILES" >> $GITHUB_ENV
-
-      - name: Package and upload modified Lambda files
-        if: env.FILES != ''
-        run: |
-          mkdir zipped
+          echo "Detected Lambda files:"
+          echo "$FILES"
+          mkdir -p zipped
           for file in $FILES; do
             name=$(basename "$file" .py)
             temp_dir=$(mktemp -d)
