@@ -40,7 +40,7 @@ jobs:
             temp_dir=$(mktemp -d)
             cp "$file" "$temp_dir/lambda_handler.py"
             zip -j "zipped/${name}.zip" "$temp_dir/lambda_handler.py"
-            aws s3 cp "zipped/${name}.zip" s3://bloom-dev-data-scripts/test/DE-176-Deployment-Test/Lambda/"${name}.zip"
+            aws s3 cp "zipped/${name}.zip" s3://bloom-dev-data-scripts/lambda/"${name}.zip"
           done
 
       - name: Teams Notification on Success
