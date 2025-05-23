@@ -31,7 +31,7 @@ jobs:
           echo "$FILES"
           for file in $FILES; do
             name=$(basename "$file")
-            aws s3 cp "$file" s3://dev-data-scripts/glue/"$name"
+            aws s3 cp "$file" s3://bloom-dev-data-scripts/glue/"$name"
           done
 
       - name: Teams Notification on Success
