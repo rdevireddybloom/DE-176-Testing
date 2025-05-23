@@ -27,7 +27,7 @@ jobs:
       - name: Detect changed Glue files
         id: detect
         run: |
-          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^glue-scripts/.*\.py' || true)
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '^python/Glue/.*\.py' || true)
           echo "FILES=$FILES" >> $GITHUB_ENV
 
       - name: Upload changed Glue scripts to S3
