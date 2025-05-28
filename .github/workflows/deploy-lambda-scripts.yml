@@ -57,3 +57,51 @@ jobs:
           curl -H "Content-Type: application/json" -d '{
             "text": "Lambda deployment failed in *${{ github.repository }}*. Please check the logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           }' ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+      - name: Append deployment log to S3
+        if: success()
+        run: |
+          set -e
+      
+          BUCKET="bloom-dev-data-scripts"
+          LOG_KEY="deployment-logs/deploy_log.jsonl"
+          TEMP_LOG="full_log.jsonl"
+          NEW_ENTRY="new_entry.json"
+      
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ACTOR="${{ github.actor }}"
+          TYPE="lambda"
+      
+          FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep "^python/${TYPE^}/.*\.py" || true)
+      
+          S3_TARGETS=""
+          for file in $FILES; do
+            name=$(basename "$file" .py)
+            S3_TARGETS+="\"s3://$BUCKET/lambda/${name}.zip\","
+          done
+          S3_TARGETS=${S3_TARGETS%,}
+      
+          FILE_ARRAY=$(echo $FILES | sed 's/ /", "/g' | sed 's/^/"/;s/$/"/')
+      
+          cat <<EOF > $NEW_ENTRY
+          {
+            "timestamp": "$TIMESTAMP",
+            "type": "$TYPE",
+            "actor": "$ACTOR",
+            "files": [ $FILE_ARRAY ],
+            "s3_targets": [ $S3_TARGETS ],
+            "status": "success",
+            "run_url": "$RUN_URL"
+          }
+          EOF
+      
+          # Download existing log or create a new one
+          aws s3 cp s3://$BUCKET/$LOG_KEY $TEMP_LOG || touch $TEMP_LOG
+      
+          # Append new entry
+          cat $NEW_ENTRY >> $TEMP_LOG
+          echo "" >> $TEMP_LOG
+      
+          # Upload full log back to S3
+          aws s3 cp $TEMP_LOG s3://$BUCKET/$LOG_KEY
