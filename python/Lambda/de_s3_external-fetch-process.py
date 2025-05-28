@@ -19,7 +19,6 @@ from botocore.exceptions import ClientError
 # ------------------ Logger Setup ------------------
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-print("Logger initialized")
 # ------------------ AWS Clients ------------------
 SECRET_REGION = os.getenv("AWS_REGION", "us-west-2")
 s3 = boto3.client("s3")
