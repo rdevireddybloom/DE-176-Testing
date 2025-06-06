@@ -19,7 +19,6 @@ from botocore.exceptions import ClientError
 # ------------------ Logger Setup ------------------
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-print("Logger initialized")
 # ------------------ AWS Clients ------------------
 SECRET_REGION = os.getenv("AWS_REGION", "us-west-2")
 s3 = boto3.client("s3")
@@ -29,7 +28,6 @@ print(f"Secrets Manager client created for region: {SECRET_REGION}")
 # ------------------ Helper Functions ------------------
 
 
-# This function retrieves a secret from AWS Secrets Manager.
 # The secret usually contains credentials like usernames and passwords.
 def get_secret(secret_name):
     try:
