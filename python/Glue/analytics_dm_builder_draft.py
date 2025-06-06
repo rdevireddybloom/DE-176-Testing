@@ -7,25 +7,21 @@ import sqlalchemy as sa
 import csv
 import logging
 
-# Initialize logging
+
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)  # Set the minimum logging level.
-# Create a StreamHandler to output to stdout
+logger.setLevel(logging.INFO)
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
 # Create a formatter to customize the log message format
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 
-# Add the handler to the logger
 logger.addHandler(handler)
 
-# Few variable initializations
 region_name = "us-west-2"
 rs_secret_name = "prod/dw/Redshift/etluser"
 lookback_num_days = 3
 
-# Create a global AWS client
 sns_client = boto3.client("sns")
 session = boto3.Session()
 s3_client = session.client("s3")

@@ -24,7 +24,8 @@ print("Logger initialized")
 SECRET_REGION = os.getenv("AWS_REGION", "us-west-2")
 s3 = boto3.client("s3")
 SECRETS_MANAGER = boto3.client("secretsmanager", region_name=SECRET_REGION)
-
+# Create a Secrets Manager client to fetch credentials for database and other services
+print(f"Secrets Manager client created for region: {SECRET_REGION}")
 # ------------------ Helper Functions ------------------
 
 

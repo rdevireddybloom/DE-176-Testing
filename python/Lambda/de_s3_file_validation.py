@@ -6,10 +6,14 @@ import re
 import urllib.parse
 import datetime
 
+# This Lambda function validates file names uploaded to S3 against rules stored in a PostgreSQL database.
+# It moves files to either a "Fetched" or "Quarantine" location based on validation results.
 s3 = boto3.client("s3")
-aws_region = 'us-west-2'
-secret_name = 'etluser/dev/rds'
+aws_region = "us-west-2"
+secret_name = "etluser/dev/rds"
 
+
+# Ensure the AWS Secrets Manager and RDS PostgreSQL libraries are available
 def get_db_secrets(secret_name, aws_region):
     """
     Retrieves the credentials from the AWS Secrets Manager.
@@ -17,36 +21,48 @@ def get_db_secrets(secret_name, aws_region):
     """
     try:
         session = boto3.session.Session()
-        client = session.client(service_name = "secretsmanager", region_name = aws_region)
+        client = session.client(service_name="secretsmanager", region_name=aws_region)
 
-        response = client.get_secret_value(SecretId = secret_name)
-        secret = json.loads(response['SecretString'])
+        response = client.get_secret_value(SecretId=secret_name)
+        secret = json.loads(response["SecretString"])
         return secret
     except Exception as e:
         print(f"Error retrieving secrets for {secret_name}: {str(e)}")
         return None
-        
+
+
 def get_db_connection(secret_json):
     """
     Establishes and returns a PostgreSQL db connection using credentials from Secrets Manager.
     """
     try:
-        #print("-- logs3 --- ", secret_json)
+        # print("-- logs3 --- ", secret_json)
         conn = psycopg2.connect(
-            host=secret_json['host'],
-            port=secret_json['port'],
-            user=secret_json['username'],
-            password=secret_json['password'],
-            dbname=secret_json['dbname'],
-            connect_timeout=60
+            host=secret_json["host"],
+            port=secret_json["port"],
+            user=secret_json["username"],
+            password=secret_json["password"],
+            dbname=secret_json["dbname"],
+            connect_timeout=60,
         )
         print("-- logs --- db connection established --- logs --")
         return conn
     except Exception as e:
         print(f"Error creating database connection: {str(e)}")
         raise
-        
-def insert_fetch_log(connection, start_time, fetch_config_id, file_name, status, bucket, location, extracted_files, notes):
+
+
+def insert_fetch_log(
+    connection,
+    start_time,
+    fetch_config_id,
+    file_name,
+    status,
+    bucket,
+    location,
+    extracted_files,
+    notes,
+):
     """
     Inserts a record into the fetch_log table.
     """
@@ -64,27 +80,31 @@ def insert_fetch_log(connection, start_time, fetch_config_id, file_name, status,
                 file_s3_bucket, file_s3_location, created_by, last_modified_by, notes
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'lambda_user', 'lambda_user', %s);
         """
-        print('-------------------')
+        print("-------------------")
         print(query)
-        print('-------------------')
+        print("-------------------")
 
-        cur.execute(query, (
-            fetch_config_id,      # ID from fetch_config table
-            file_name,            # Actual name of the processed file
-            status,               # "Fetched", "Quarantined", etc.
-            start_time,           # Time when Lambda began processing <fetch_start_at>
-            now,                  # Time when logging occurred <fetch_end_at>
-            extracted_files,      # All files extracted ( from a ZIP TBD.)
-            bucket,               # Final destination S3 bucket
-            location,             # Final destination folder (Fetched/Quarantine)
-            notes                 # Notes about validation outcome or errors
-        ))
+        cur.execute(
+            query,
+            (
+                fetch_config_id,  # ID from fetch_config table
+                file_name,  # Actual name of the processed file
+                status,  # "Fetched", "Quarantined", etc.
+                start_time,  # Time when Lambda began processing <fetch_start_at>
+                now,  # Time when logging occurred <fetch_end_at>
+                extracted_files,  # All files extracted ( from a ZIP TBD.)
+                bucket,  # Final destination S3 bucket
+                location,  # Final destination folder (Fetched/Quarantine)
+                notes,  # Notes about validation outcome or errors
+            ),
+        )
 
         connection.commit()
         cur.close()
         print(f"Log inserted for file {file_name} with status {status}")
     except Exception as e:
         print(f"Error logging fetch event: {str(e)}")
+
 
 def split_file_name(file_name):
     """
@@ -105,11 +125,12 @@ def split_file_name(file_name):
         if match:
             # If matched, return the 3 captured groups:
             # Group 1: prefix, Group 2: date or versioned date part, Group 3: suffix (file extension or additional tag like "_Updated")
-            return match.group(1), match.group(2), match.group(3) 
+            return match.group(1), match.group(2), match.group(3)
         else:
             return None, None, None
     except Exception as e:
         print(f"Error splitting file name: {str(e)}")
+
 
 def get_validation_rules(connection, bucket_name, fetch_location, file_name):
     """
@@ -140,19 +161,45 @@ def get_validation_rules(connection, bucket_name, fetch_location, file_name):
                 AND file_name_mask LIKE %s
                 AND CURRENT_DATE BETWEEN effective_start_date AND effective_end_date;
         """
-        print('-------------------')
-        print(query, (('%'+bucket_name+'%', '%'+fetch_location+'%', '%'+prefix, suffix+'%')))
-        print('-------------------')
-        
+        print("-------------------")
+        print(
+            query,
+            (
+                (
+                    "%" + bucket_name + "%",
+                    "%" + fetch_location + "%",
+                    "%" + prefix,
+                    suffix + "%",
+                )
+            ),
+        )
+        print("-------------------")
+
         # Execute the query with wildcard parameters
-        cur.execute(query, ('%'+bucket_name+'%', '%'+fetch_location+'%', prefix+'%', '%'+suffix))
+        cur.execute(
+            query,
+            (
+                "%" + bucket_name + "%",
+                "%" + fetch_location + "%",
+                prefix + "%",
+                "%" + suffix,
+            ),
+        )
 
         results = cur.fetchall()
         cur.close()
         if results:
 
             # return the results as a list of dictionaries
-            return [{"fetch_config_id": row[0], "file_name_mask": row[1], "target_s3_bucket": row[2], "target_s3_location": row[3]} for row in results]
+            return [
+                {
+                    "fetch_config_id": row[0],
+                    "file_name_mask": row[1],
+                    "target_s3_bucket": row[2],
+                    "target_s3_location": row[3],
+                }
+                for row in results
+            ]
         else:
             print(f"No validation rules found for {file_name} at {bucket_name}")
             return None
@@ -160,6 +207,7 @@ def get_validation_rules(connection, bucket_name, fetch_location, file_name):
     except Exception as e:
         print(f"Error fetching validation rules: {str(e)}")
         return None
+
 
 def extract_date_format(file_name_mask):
     """
@@ -169,14 +217,14 @@ def extract_date_format(file_name_mask):
         - A regex pattern that captures the date
         - The Python datetime format string
     """
-    if 'yyyy-mm-dd-qq' in file_name_mask:
-        return 'yyyy-mm-dd-qq', r'(\d{4}-\d{2}-\d{2})-(\d{2})', '%Y-%m-%d'
-    elif 'yyyy-mm-dd' in file_name_mask:
-        return 'yyyy-mm-dd', r'(\d{4}-\d{2}-\d{2})', '%Y-%m-%d'
-    elif 'mmddyyyy' in file_name_mask:
-        return 'mmddyyyy', r'(\d{8})', '%m%d%Y'
-    elif '????????' in file_name_mask:
-        return '????????', r'(.{8})', None
+    if "yyyy-mm-dd-qq" in file_name_mask:
+        return "yyyy-mm-dd-qq", r"(\d{4}-\d{2}-\d{2})-(\d{2})", "%Y-%m-%d"
+    elif "yyyy-mm-dd" in file_name_mask:
+        return "yyyy-mm-dd", r"(\d{4}-\d{2}-\d{2})", "%Y-%m-%d"
+    elif "mmddyyyy" in file_name_mask:
+        return "mmddyyyy", r"(\d{8})", "%m%d%Y"
+    elif "????????" in file_name_mask:
+        return "????????", r"(.{8})", None
     else:
         return None, None, None
 
@@ -186,14 +234,16 @@ def is_valid_file_name(file_name, validation_rules):
     Validates whether the file name matches one of the rules and its embedded date string is valid.
     Returns the matching rule, all masks checked, and a status note.
     """
-    
+
     matching_masks = [rule["file_name_mask"] for rule in validation_rules]
-    notes = 'File Name Validation Failed'
+    notes = "File Name Validation Failed"
 
     # Iterate through each rule to check if any pattern matches the file_name
     for rule in validation_rules:
         file_name_mask = rule["file_name_mask"]
-        print(f"Attempting to Validate the filename: {file_name} against the mask: {file_name_mask}")
+        print(
+            f"Attempting to Validate the filename: {file_name} against the mask: {file_name_mask}"
+        )
 
         # Extract the dynamic date portion and its regex/format from the mask
         date_token, date_regex, date_format = extract_date_format(file_name_mask)
@@ -211,24 +261,31 @@ def is_valid_file_name(file_name, validation_rules):
         if match:
             try:
                 # Validate the extracted date string using datetime.strptime
-                if date_token == 'yyyy-mm-dd-qq':
+                if date_token == "yyyy-mm-dd-qq":
                     # Group 1 = date, Group 2 = version
                     datetime.datetime.strptime(match.group(1), date_format)
-                    int(match.group(2)) # Ensure version is numeric
+                    int(match.group(2))  # Ensure version is numeric
                 else:
                     # Only a date is expected
                     datetime.datetime.strptime(match.group(1), date_format)
             except Exception as e:
                 # If date parsing fails, skip to the next rule
-                print(f"Date validation failed for {file_name} with expected format {date_format}")
-                notes='Date Validation Failed'
+                print(
+                    f"Date validation failed for {file_name} with expected format {date_format}"
+                )
+                notes = "Date Validation Failed"
                 continue
 
             # If all validations pass, return the matching rule and a success message
             print(f"File {file_name} matched pattern {file_name_mask}")
-            return rule, matching_masks, 'File Name Validation Passed successfully' # we stop at first valid match
+            return (
+                rule,
+                matching_masks,
+                "File Name Validation Passed successfully",
+            )  # we stop at first valid match
 
     return None, matching_masks, notes
+
 
 def move_file(source_bucket, source_key, target_bucket, target_key):
     """
@@ -237,21 +294,28 @@ def move_file(source_bucket, source_key, target_bucket, target_key):
         1. Copies the file to the new location (fetched or quarantine).
         2. Deletes the original file to complete the "move".
     """
-    print(f"Attempting to move the file from {source_bucket}/{source_key} to {target_bucket}/{target_key}")
+    print(
+        f"Attempting to move the file from {source_bucket}/{source_key} to {target_bucket}/{target_key}"
+    )
     try:
         # Copy the file from the source bucket/key to the target bucket/key
         s3.copy_object(
             Bucket=target_bucket,
             CopySource={"Bucket": source_bucket, "Key": source_key},
-            Key=target_key
+            Key=target_key,
         )
 
         # Delete the file from the original location to simulate a move
         s3.delete_object(Bucket=source_bucket, Key=source_key)
-        print(f"File moved successfully from {source_bucket}/{source_key} to {target_bucket}/{target_key}")
+        print(
+            f"File moved successfully from {source_bucket}/{source_key} to {target_bucket}/{target_key}"
+        )
 
     except Exception as e:
-        print(f"Error moving file from {source_bucket}/{source_key} to {target_bucket}/{target_key}: {str(e)}")
+        print(
+            f"Error moving file from {source_bucket}/{source_key} to {target_bucket}/{target_key}: {str(e)}"
+        )
+
 
 def lambda_handler(event, context):
     """
@@ -259,7 +323,7 @@ def lambda_handler(event, context):
     Validates the file name, checks against DB rules, and moves to Fetched or Quarantine accordingly.
     """
     conn = None
-    start_time = datetime.datetime.now(datetime.UTC) # Capture start time for logging
+    start_time = datetime.datetime.now(datetime.UTC)  # Capture start time for logging
     try:
         # Loop through all S3 records in the event
         for record in event["Records"]:
@@ -273,36 +337,47 @@ def lambda_handler(event, context):
             # Extract the folder path and file name
             fetch_location = "/".join(object_key.split("/")[:-1]) + "/"
             file_name = object_key.split("/")[-1]
-            print(f"-- logs --- Processing file: {file_name} in bucket: {source_bucket}, location: {fetch_location}")
+            print(
+                f"-- logs --- Processing file: {file_name} in bucket: {source_bucket}, location: {fetch_location}"
+            )
 
             # Get DB connection and fetch applicable validation rules
             conn = get_db_connection(get_db_secrets(secret_name, aws_region))
             validation_rules = get_validation_rules(
                 conn,
                 source_bucket,
-                fetch_location[:len(fetch_location) - 1],  # remove trailing slash for DB matching
-                file_name
+                fetch_location[
+                    : len(fetch_location) - 1
+                ],  # remove trailing slash for DB matching
+                file_name,
             )
             if not validation_rules:
                 # No rules matched, quarantine the file
-                quarantine_bucket = 'bloom-dev-data-team'
+                quarantine_bucket = "bloom-dev-data-team"
                 quarantine_key = f"{'Quarantine'}/{file_name}"
-                move_file(source_bucket, fetch_location + file_name, quarantine_bucket, quarantine_key)
+                move_file(
+                    source_bucket,
+                    fetch_location + file_name,
+                    quarantine_bucket,
+                    quarantine_key,
+                )
                 insert_fetch_log(
                     connection=conn,
                     start_time=start_time,
-                    fetch_config_id="-1", # -1 for untracked config
+                    fetch_config_id="-1",  # -1 for untracked config
                     file_name=file_name,
                     status="No Validation Rules",
                     bucket=quarantine_bucket,
                     location="Quarantine",
                     extracted_files=None,
-                    notes='No Matching Validation Rules Found for this File'
-                    )
+                    notes="No Matching Validation Rules Found for this File",
+                )
                 return
 
             # Validate the file name using the fetched rules
-            matching_rule, matching_masks, notes = is_valid_file_name(file_name, validation_rules)
+            matching_rule, matching_masks, notes = is_valid_file_name(
+                file_name, validation_rules
+            )
             extracted_masks = ", ".join([mask for mask in matching_masks])
             print(extracted_masks)
             if matching_rule:
@@ -310,7 +385,12 @@ def lambda_handler(event, context):
                 target_bucket = matching_rule["target_s3_bucket"]
                 target_location = matching_rule["target_s3_location"]
                 fetched_key = f"{target_location}/{file_name}"
-                move_file(source_bucket, fetch_location + file_name, target_bucket, fetched_key)
+                move_file(
+                    source_bucket,
+                    fetch_location + file_name,
+                    target_bucket,
+                    fetched_key,
+                )
                 insert_fetch_log(
                     connection=conn,
                     start_time=start_time,
@@ -319,14 +399,19 @@ def lambda_handler(event, context):
                     status="Fetched",
                     bucket=target_bucket,
                     location=target_location,
-                    extracted_files=None, # TBD for Zip files
-                    notes=notes
-                    )
+                    extracted_files=None,  # TBD for Zip files
+                    notes=notes,
+                )
             else:
                 # Validation failed, move to quarantine
-                quarantine_bucket = 'bloom-dev-data-team'
+                quarantine_bucket = "bloom-dev-data-team"
                 quarantine_key = f"{'Quarantine'}/{file_name}"
-                move_file(source_bucket, fetch_location + file_name, quarantine_bucket, quarantine_key)
+                move_file(
+                    source_bucket,
+                    fetch_location + file_name,
+                    quarantine_bucket,
+                    quarantine_key,
+                )
                 insert_fetch_log(
                     connection=conn,
                     start_time=start_time,
@@ -334,16 +419,18 @@ def lambda_handler(event, context):
                     file_name=file_name,
                     status="Quarantined",
                     bucket=quarantine_bucket,
-                    location='Quarantine',
-                    extracted_files=None, # TBD for Zip files
-                    notes=notes
-                    )
+                    location="Quarantine",
+                    extracted_files=None,  # TBD for Zip files
+                    notes=notes,
+                )
 
     except Exception as e:
         print(f"Error processing file: {str(e)}")
     finally:
         if conn:
             conn.close()
+
+
 """
 Testing parameters
 event = {
