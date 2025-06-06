@@ -6,11 +6,10 @@ import re
 import urllib.parse
 import datetime
 
-# This Lambda function validates file names uploaded to S3 against rules stored in a PostgreSQL database.
-# It moves files to either a "Fetched" or "Quarantine" location based on validation results.
 s3 = boto3.client("s3")
 aws_region = "us-west-2"
 secret_name = "etluser/dev/rds"
+# Ensure the AWS Secrets Manager and RDS PostgreSQL libraries are available
 
 
 # Ensure the AWS Secrets Manager and RDS PostgreSQL libraries are available
