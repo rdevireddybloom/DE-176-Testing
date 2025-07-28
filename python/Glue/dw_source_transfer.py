@@ -7,14 +7,10 @@ import pandas as pd
 import pymssql
 import sqlalchemy as sa
 import csv
-
+import logging
 import time
 from awsglue.utils import getResolvedOptions
 
-# Initialize logging
-# Get the root logger
-# Set the logging level to INFO
-import logging
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

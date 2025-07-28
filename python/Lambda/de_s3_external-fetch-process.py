@@ -15,17 +15,28 @@ import zipfile
 from ftplib import FTP
 import datetime
 from botocore.exceptions import ClientError
+from de_aws_utils.logging.cloudwatchsnslogger import CloudWatchSNSLogger
 
 # ------------------ Logger Setup ------------------
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-print("Logger initialized")
+# logger = logging.getLogger()
+# logger.setLevel(logging.INFO)
+
+aws_region = os.environ.get("REGION", "us-west-2")
+do_secret_name = os.environ.get("DO_SECRET_NAME", "etluser/dev/rds")
+env = os.environ.get("ENV", "Dev")
+job_name = os.environ.get("JOB_NAME", "External-Fetch-Process")
+job_class = os.environ.get("JOB_CLASS", "Testing")
+
+logger = CloudWatchSNSLogger()
+logger.process_name = job_name
+logger.env = env
+logger.job_class = job_class
+logger.service = "lambda"
 # ------------------ AWS Clients ------------------
-SECRET_REGION = os.getenv("AWS_REGION", "us-west-2")
+# SECRET_REGION = os.getenv("AWS_REGION", "us-west-2")
 s3 = boto3.client("s3")
-SECRETS_MANAGER = boto3.client("secretsmanager", region_name=SECRET_REGION)
-# Create a Secrets Manager client to fetch credentials for database and other services
-print(f"Secrets Manager client created for region: {SECRET_REGION}")
+SECRETS_MANAGER = boto3.client("secretsmanager", region_name=aws_region)
+
 # ------------------ Helper Functions ------------------
 
 
@@ -61,7 +72,7 @@ def get_db_connection(secret_name):
             password=secret["password"],  # Database password
             port=secret.get(
                 "port", 5432
-            ),  # Optional port (defaults to 5432 if not provided).
+            ),  # Optional port (defaults to 5432 if not provided)
         )
 
     except Exception as e:
@@ -80,17 +91,24 @@ def fetch_all_configs(conn):
             # These include details needed to pull files: source type, paths, credentials, etc.
             cur.execute(
                 """
-                SELECT fetch_config_id, source_type, sftp_location, access_secret,
-                       s3_fetch_bucket, s3_fetch_location, web_fetch_url, file_name_mask
-                FROM data_operations.fetch_config
-                WHERE CURRENT_DATE BETWEEN effective_start_date AND effective_end_date;
-            """
+                SELECT external_fetch_config_id, file_name_mask, external_fetch_type, fetch_location, access_secret,
+                       target_s3_bucket, target_s3_location, extract_fetched_file_flag, add_date_to_file_name_flag,
+                       source_file_archive_bucket, source_file_archive_location
+                FROM data_operations.external_fetch_config
+                WHERE CURRENT_DATE BETWEEN effective_start_date AND effective_end_date
+                AND (date_part('day', current_date)::varchar = any(string_to_array(schedule_days_of_month_list, ','))
+                or schedule_days_of_month_list = 'any')
+                and (to_char(current_date, 'Dy') = any(string_to_array(schedule_days_of_week_list, ','))
+                or schedule_days_of_week_list = 'any')
+                and (date_part('hour', current_timestamp)::varchar = any(string_to_array(schedule_hours_of_day_list, ','))
+                or schedule_hours_of_day_list = 'any');
+                """
             )
             return cur.fetchall()
 
     except Exception as e:
-        logger.error(f"Error fetching fetch_config list: {e}")
-        return []
+        logger.exception(f"Error fetching fetch_config list: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
 
 
 # This function takes a file name pattern (mask) and replaces any date placeholders
@@ -177,23 +195,22 @@ def upload_to_s3_and_validate(file_data, bucket, key, expected_md5):
             return False  # Data mismatch detected
 
     except Exception as e:
-        print(f"S3 upload/validation error: {e}")
-        return False
+        logger.exception(f"S3 upload/validation error: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
 
 
 # This function logs details of a file fetch operation into the external_fetch_log table.
 # It tracks the file name, checksum, status, error (if any), file size, and timestamps.
 def log_fetch_event(
     conn,  # Database connection object
+    fetched_file_name,  # Original file name before processing
     file_name,  # Name of the file that was fetched or processed
+    archived_file_name,  # Name of the file after archiving
     config_id,  # The fetch_config_id from fetch_config table
-    checksum,  # MD5 checksum of the file
     status,  # Status of the operation: 'Success' or 'Failed'
-    s3_bucket,  # Target S3 bucket where the file was uploaded
-    s3_key,  # Path inside the S3 bucket
     error_msg,  # Any error message if the operation failed
-    file_size,  # Size of the file in bytes
     start_time,  # Timestamp when the operation started
+    notes,
 ):
     try:
         with conn.cursor() as cur:
@@ -201,28 +218,28 @@ def log_fetch_event(
             cur.execute(
                 """
                 INSERT INTO data_operations.external_fetch_log (
-                    fetch_config_id, fetched_file_name, checksum, fetch_status,
-                    target_s3_bucket, target_s3_key, error_message,
-                    file_size, fetch_start_at, fetch_end_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now());
+                    external_fetch_config_id, fetched_file_name, 
+                    target_file_name, archived_file_name, process_status,
+                    start_datetime, end_datetime, notes
+                ) VALUES (%s, %s, %s, %s, %s, %s, now(), %s);
             """,
                 (
                     config_id,
+                    fetched_file_name,
                     file_name,
-                    checksum,
+                    archived_file_name,
                     status,
-                    s3_bucket,
-                    s3_key,
-                    error_msg,
-                    file_size,
+                    # error_msg,
                     start_time,
+                    notes,
                 ),
             )
 
             conn.commit()
 
     except Exception as e:
-        print(f"Logging error: {e}")
+        logger.exception(f"Logging error: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
 
 
 # This function extracts all non-directory files from a ZIP archive stored in memory.
@@ -245,8 +262,33 @@ def extract_zip_file(file_bytes):
         return extracted_files
 
     except Exception as e:
-        print(f"Error extracting ZIP: {e}")
-        return []
+        logger.exception(f"Error extracting ZIP: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
+
+
+def apply_date_to_file_name(file_name_mask):
+    name, ext = os.path.splitext(file_name_mask)
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return f"{name}_{timestamp}{ext}"
+
+
+def archive_file_to_s3(
+    file_name,  # Name of the file being archived
+    s3_bucket,  # Target S3 bucket for archiving
+    s3_path,  # S3 folder/path where file should be archived
+    file_data,  # Raw byte content of the file
+):
+    try:
+        file_name = apply_date_to_file_name(file_name)
+        s3_key = f"{s3_path.rstrip('/')}/{file_name}"
+        # Upload the file to S3 for archiving
+        s3.upload_fileobj(io.BytesIO(file_data), s3_bucket, s3_key)
+        print(f"Archived file to S3: s3://{s3_bucket}/{s3_key}")
+        return file_name  # Return the name of the archived file
+
+    except Exception as e:
+        logger.exception(f"Error archiving file to S3: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
 
 
 # This function handles the logic for uploading a file (or ZIP contents) to S3.
@@ -257,71 +299,87 @@ def process_and_upload(
     file_data,  # Raw byte content of the file
     s3_bucket,  # Target S3 bucket name
     s3_path,  # S3 folder/path where file should be uploaded
+    archive_bucket,  # Optional archive bucket for source files
+    archive_location,  # Optional archive path for source files
     config_id,  # ID from the fetch_config row
+    extract_flag,
+    add_date_flag,
     conn,  # Database connection (used for logging)
     start_time,  # Timestamp when the fetch operation started
 ):
+    try:
+        fetched_file_name = file_name  # Store the original file name for logging
+        archived_file_name = archive_file_to_s3(
+            file_name, archive_bucket, archive_location, file_data
+        )
+        if add_date_flag:
+            # If the flag is set, apply the current date to the file name
+            file_name = apply_date_to_file_name(file_name)
+        print(f"Processing file {fetched_file_name}: {file_name}")
+        # If the file is a ZIP archive, and extract flag is true, then extract it and process each inner file
+        if file_name.endswith(".zip") and extract_flag == True:
+            extracted = extract_zip_file(file_data)  # Extracts inner files
+            success = True  # Flag to track if all inner files are uploaded successfully
 
-    # If the file is a ZIP archive, extract it and process each inner file
-    if file_name.endswith(".zip"):
-        extracted = extract_zip_file(file_data)  # Extracts inner files
-        success = True  # Flag to track if all inner files are uploaded successfully
+            for inner_name, inner_bytes in extracted:
+                # Create the full S3 key/path for the extracted file
+                if add_date_flag:
+                    inner_name = apply_date_to_file_name(inner_name)
 
-        for inner_name, inner_bytes in extracted:
-            # Create the full S3 key/path for the extracted file
-            inner_key = f"{s3_path.rstrip('/')}/{inner_name}"
+                inner_key = f"{s3_path.rstrip('/')}/{inner_name}"
 
-            # Generate checksum for the inner file
-            checksum = calculate_md5_bytes(inner_bytes)
+                # Generate checksum for the inner file
+                checksum = calculate_md5_bytes(inner_bytes)
 
-            # Upload the file and validate its integrity
-            if upload_to_s3_and_validate(inner_bytes, s3_bucket, inner_key, checksum):
-                # If successful, log the event in the database
+                # Upload the file and validate its integrity
+                if upload_to_s3_and_validate(
+                    inner_bytes, s3_bucket, inner_key, checksum
+                ):
+                    # If successful, log the event in the database
+                    log_fetch_event(
+                        conn,
+                        fetched_file_name,  # We log the original ZIP file name here
+                        inner_name,  # Use the inner file name for target filename logging
+                        archived_file_name,  # Archive file name
+                        config_id,
+                        "Success",
+                        None,
+                        start_time,
+                        "File extracted from ZIP and uploaded",
+                    )
+                else:
+                    success = False  # If any file fails to upload/validate, mark as unsuccessful
+
+            return success  # Return True only if all extracted files succeeded
+
+        else:
+
+            s3_key = f"{s3_path.rstrip('/')}/{file_name}"
+
+            # Calculate checksum
+            checksum = calculate_md5_bytes(file_data)
+
+            # Upload and validate
+            if upload_to_s3_and_validate(file_data, s3_bucket, s3_key, checksum):
+                # Log if successful
                 log_fetch_event(
                     conn,
-                    file_name,  # We log the original ZIP file name here
+                    fetched_file_name,  # Original file name for logging
+                    file_name,  # Target file name in S3
+                    archived_file_name,  # Archive file name
                     config_id,
-                    checksum,
                     "Success",
-                    s3_bucket,
-                    inner_key,
-                    None,
-                    len(inner_bytes),
+                    None,  # No error message if successful
                     start_time,
+                    "File uploaded to S3 successfully",
                 )
-            else:
-                success = (
-                    False  # If any file fails to upload/validate, mark as unsuccessful
-                )
+                return True
 
-        return success  # Return True only if all extracted files succeeded
-
-    else:
-        # If the file is not a ZIP, process it directly
-        s3_key = f"{s3_path.rstrip('/')}/{file_name}"
-
-        # Calculate checksum
-        checksum = calculate_md5_bytes(file_data)
-
-        # Upload and validate
-        if upload_to_s3_and_validate(file_data, s3_bucket, s3_key, checksum):
-            # Log if successful
-            log_fetch_event(
-                conn,
-                file_name,
-                config_id,
-                checksum,
-                "Success",
-                s3_bucket,
-                s3_key,
-                None,
-                len(file_data),
-                start_time,
-            )
-            return True
-
-        # Return False if upload or validation failed
-        return False
+            # Return False if upload or validation failed
+            return False
+    except Exception as e:
+        logger.exception(f"Error processing file {fetched_file_name}: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
 
 
 # This function connects to an FTP server using the provided credentials,
@@ -353,7 +411,7 @@ def fetch_from_ftp(creds, remote_dir):
         ftp.quit()
 
     except Exception as e:
-        print(f"FTP fetch error: {e}")
+        logger.exception(f"FTP fetch error: {e}")
 
     return files
 
@@ -398,8 +456,9 @@ def fetch_from_sftp(creds, remote_dir):
         return files, sftp
 
     except Exception as e:
-        print(f"SFTP fetch error: {e}")
-        return [], None
+        logger.exception(f"SFTP fetch error: {e}")
+        raise e  # Re-raise the exception to be handled by the caller
+        # return [], None
 
 
 # ------------------ Lambda Handler ------------------
@@ -410,38 +469,52 @@ def fetch_from_sftp(creds, remote_dir):
 # validates them, logs the result, and cleans up if necessary.
 def lambda_handler(event, context):
     # Step 1: Connect to the PostgreSQL database using the RDS secret
-    conn = get_db_connection("etluser/dev/rds")
+    conn = get_db_connection(do_secret_name)
+    fetched_files = []  # List to keep track of fetched files
     # Record the start time to include in fetch logs
     start_time = datetime.datetime.now(datetime.UTC)  # Capture start time for logging
     if not conn:
-        print("Database connection failed")
-        return
+        logger.exception("Database connection failed")
+        return {
+            "statusCode": 500,
+            "body": json.dumps(
+                {"Database connection error": "Failed to connect to database"}
+            ),
+        }
 
     try:
         # Step 2: Fetch all valid fetch_config records for today
         configs = fetch_all_configs(conn)
         if not configs:
-            print("No active fetch_config records found")
-            return
+            # print("No active fetch_config records found")
+            logger.info("No active fetch_config records found")
+            # If no configurations are found, return a message indicating no work to do
+            return {
+                "statusCode": 200,
+                "body": json.dumps("No active fetch_config records found"),
+            }
         # Step 3: Process each configuration one by one
         for cfg in configs:
             (
                 config_id,  # Unique ID for this config
+                file_name_mask,  # File name pattern to resolve
                 fetch_type,  # Type of source (HTTP, FTP, or SFTP)
                 location,  # Path or URL (depends on type)
                 secret_name,  # Secret name for credentials
                 s3_bucket,  # Target S3 bucket
                 s3_path,  # S3 key prefix (folder)
-                web_url,  # Base URL if HTTP
-                file_name_mask,  # Pattern for file name (e.g., file_mmddyyyy.csv)
+                extract_fetched_file_flag,  # Flag to extract files from ZIP
+                add_date_to_file_name_flag,  # Flag to add date to file name
+                archive_bucket,  # Archive bucket for source files
+                archive_location,  # Archive path for source files
             ) = cfg
-            print(
-                f"Processing fetch_config_id: {config_id} ({fetch_type}) ({file_name_mask})"
-            )
+            # logger.info(
+            #     f"Processing fetch_config_id: {config_id} ({fetch_type}) ({file_name_mask})"
+            # )
             # Step 4: Handle HTTP file fetch
-            if fetch_type.upper() == "HTTP" and web_url:
-                final_url = resolve_web_url(web_url, file_name_mask)
-                print(f"Resolved download URL: {final_url}")
+            if fetch_type.upper() == "HTTP" and location:
+                final_url = resolve_web_url(location, file_name_mask)
+                logger.debug(f"Resolved download URL: {final_url}")
                 try:
                     response = requests.get(final_url)  # Attempt to download the file
                     if response.status_code == 200:
@@ -453,24 +526,35 @@ def lambda_handler(event, context):
                             file_data,
                             s3_bucket,
                             s3_path,
+                            archive_bucket,
+                            archive_location,
                             config_id,
+                            extract_fetched_file_flag,
+                            add_date_to_file_name_flag,
                             conn,
                             start_time,
                         )
+                        fetched_files.append(file_name)  # Track fetched files
                         continue  # Skip to next config
                     else:
-                        print(
+                        logger.error(
                             f"Failed to download file from HTTP. Status code: {response.status_code}"
                         )
                 except Exception as e:
-                    print(f"HTTP request failed: {e}")
+                    logger.exception(f"HTTP request failed: {e}")
+                    continue  # Skip to next config
+                    # Uncomment the following lines to return an error response
+                    # return {
+                    #     "statusCode": 500,
+                    #     "body": json.dumps({"HTTP request error": str(e)}),
+                    # }
 
             # Step 5: Handle SFTP and FTP file fetch
             # For SFTP and FTP, we need to fetch credentials from AWS Secrets Manager
             creds = get_secret(secret_name)
             if not creds:
-                print(f"Missing credentials for secret: {secret_name}")
-                continue
+                logger.error(f"Missing credentials for secret: {secret_name}")
+                continue  # Skip to next config if credentials are missing
 
             # Step 6: Fetch files from SFTP or FTP
             # For SFTP, we also need to delete files after processing
@@ -482,17 +566,25 @@ def lambda_handler(event, context):
                         file_data,
                         s3_bucket,
                         s3_path,
+                        archive_bucket,
+                        archive_location,
                         config_id,
+                        extract_fetched_file_flag,
+                        add_date_to_file_name_flag,
                         conn,
                         start_time,
                     )
+                    fetched_files.append(file_name)  # Track fetched files
                     # If upload succeeded, delete file from SFTP
                     if success:
                         try:
                             sftp.remove(remote_path)
-                            print(f"Deleted from SFTP: {remote_path}")
+                            logger.debug(f"Deleted from SFTP: {remote_path}")
                         except Exception as de:
-                            print(f"Failed to delete from SFTP: {remote_path}: {de}")
+                            logger.exception(
+                                f"Failed to delete from SFTP: {remote_path}: {de}"
+                            )
+                            continue  # Skip to next config
                 if sftp:
                     sftp.close()
             # Step 7: Handle FTP file fetch
@@ -505,25 +597,38 @@ def lambda_handler(event, context):
                         file_data,
                         s3_bucket,
                         s3_path,
+                        archive_bucket,
+                        archive_location,
                         config_id,
+                        extract_fetched_file_flag,
+                        add_date_to_file_name_flag,
                         conn,
                         start_time,
                     )
+                    fetched_files.append(file_name)  # Track fetched files
 
     except Exception as e:
-        print(f"Unhandled exception during fetch run: {e}")
+        logger.exception(f"Unhandled exception during fetch run: {e}")
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)}),
+        }
     finally:
         # Step 9: closing DB connection
         conn.close()
-        print("Database connection closed")
-        print("Lambda function completed successfully")
+        logger.info(
+            f"External Fetch process completed successfully, the fetched files are: {fetched_files}"
+        )
+        logger.debug("Database connection closed")
+        logger.debug("Lambda function completed successfully")
     return {
         "statusCode": 200,
-        "body": json.dumps("Fetch process completed successfully"),
+        "body": json.dumps("External Fetch process completed successfully"),
     }
 
 
 """
 # Uncomment the following lines to test the function locally
+
 lambda_handler(None, None)
 """
