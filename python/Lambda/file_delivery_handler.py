@@ -15,8 +15,11 @@ job_name = os.environ.get("JOB_NAME", "File-Delivery-Handler")
 job_class = os.environ.get("JOB_CLASS", "Testing")
 
 s3_client = boto3.client("s3")
+print(f"Using S3 client in region: {s3_client.meta.region_name}")
+print(f"Using environment: {env}, job name: {job_name}, job class: {job_class}")
 aws_region = os.getenv("AWS_REGION", "us-west-2")
 SECRETS_MANAGER = boto3.client("secretsmanager", region_name=aws_region)
+print(f"Using Secrets Manager in region: {aws_region}")
 
 
 def get_secret(secret_name):
@@ -110,6 +113,10 @@ def file_delivery_handler(file_obj, config=None):
 
 def get_matching_configs(schedule_based=False):
     print("Stub: returning dummy config")
+    if schedule_based:
+        print("Returning configs for scheduled delivery")
+    else:
+        print("Returning configs for event-based delivery")
     return [
         {
             "extract_config_id": 1,
@@ -122,6 +129,7 @@ def get_matching_configs(schedule_based=False):
 
 
 def convert_mask_into_regex(mask: str) -> str:
+    """Convert a file name mask with placeholders into a regex pattern."""
     regex = re.escape(mask)
 
     regex = regex.replace(r"\#\#\#YEAR\#\#\#", r"(?P<year>\d{4})")
