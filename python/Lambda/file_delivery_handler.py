@@ -145,6 +145,10 @@ def convert_mask_into_regex(mask: str) -> str:
 
 def get_matching_config_for_file(file_name):
     # print(f"Stub: found config for {file_name}")
+    print(f"Searching for config matching file: {file_name}")
+    if not file_name:
+        print("No file name provided")
+        return None
     conn = get_db_connection(do_secret_name)
     cur = conn.cursor()
     # if cur is None:
@@ -183,9 +187,9 @@ def get_matching_config_for_file(file_name):
     # }
 
 
-# def should_deliver_now(config):
-#     print("Stub: delivery window check passed")
-#     return True
+def should_deliver_now(config):
+    print("Stub: delivery window check passed")
+    return True
 
 
 def deliver_to_s3(bucket, key, config):
