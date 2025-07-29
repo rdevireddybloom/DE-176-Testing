@@ -176,15 +176,15 @@ def get_matching_config_for_file(file_name):
             return config
     print(f"No matching config found for file {file_name}")
     cur.close()
-    return None
+    # return None
 
-    # return {
-    #     "extract_config_id": 1,
-    #     "deliver_type": "S3",
-    #     "include_header_flag": False,
-    #     "deliver_s3_bucket": "bloom-dev-data-team",
-    #     "deliver_s3_location": "test/delivery_testing_target/decrypted_sample.txt",
-    # }
+    return {
+        "extract_config_id": 1,
+        "deliver_type": "S3",
+        "include_header_flag": False,
+        "deliver_s3_bucket": "bloom-dev-data-team",
+        "deliver_s3_location": "test/delivery_testing_target/decrypted_sample.txt",
+    }
 
 
 def should_deliver_now(config):
