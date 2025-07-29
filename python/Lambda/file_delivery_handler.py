@@ -6,6 +6,10 @@ import psycopg2
 from datetime import datetime
 
 do_secret_name = os.environ.get("DO_SECRET_NAME", "etluser/dev/rds")
+print(f"Using secret name: {do_secret_name}")
+print(f"Environment: {os.environ.get('ENV', 'Dev')}")
+print(f"Job Name: {os.environ.get('JOB_NAME', 'File-Delivery-Handler')}")
+print(f"Job Class: {os.environ.get('JOB_CLASS', 'Testing')}")
 env = os.environ.get("ENV", "Dev")
 job_name = os.environ.get("JOB_NAME", "File-Delivery-Handler")
 job_class = os.environ.get("JOB_CLASS", "Testing")
@@ -272,50 +276,50 @@ def remove_header_if_needed(bucket, key, config):
     return temp_key, len(content) - 1  # return new key and new row count
 
 
-# def validate_file_header(bucket, key, config):
-#     print(f"Validating header for file {key} in bucket {bucket}")
-#     expected_headers_str = config.get("expected_headers")
-#     delimiter = config.get("extract_delimiter", ",")
-#     quarantine_bucket = config.get("quarantine_s3_bucket")
-#     quarantine_prefix = config.get("quarantine_s3_location")
+def validate_file_header(bucket, key, config):
+    print(f"Validating header for file {key} in bucket {bucket}")
+    expected_headers_str = config.get("expected_headers")
+    delimiter = config.get("extract_delimiter", ",")
+    quarantine_bucket = config.get("quarantine_s3_bucket")
+    quarantine_prefix = config.get("quarantine_s3_location")
 
-#     try:
-#         obj = s3_client.get_object(Bucket=bucket, Key=key)
-#         body = obj["Body"].read().decode("utf-8").splitlines()
+    try:
+        obj = s3_client.get_object(Bucket=bucket, Key=key)
+        body = obj["Body"].read().decode("utf-8").splitlines()
 
-#         if not body:
-#             raise Exception("File is empty")
+        if not body:
+            raise Exception("File is empty")
 
-#         # Check header if expected
-#         if expected_headers_str:
-#             expected_headers = [
-#                 h.strip() for h in expected_headers_str.split(delimiter)
-#             ]
-#             actual_headers = body[0].split(delimiter)
+        # Check header if expected
+        if expected_headers_str:
+            expected_headers = [
+                h.strip() for h in expected_headers_str.split(delimiter)
+            ]
+            actual_headers = body[0].split(delimiter)
 
-#             if actual_headers != expected_headers:
-#                 raise Exception(
-#                     f"Header mismatch\nExpected: {expected_headers}\nFound: {actual_headers}"
-#                 )
+            if actual_headers != expected_headers:
+                raise Exception(
+                    f"Header mismatch\nExpected: {expected_headers}\nFound: {actual_headers}"
+                )
 
-#         return True
+        return True
 
-#     except Exception as e:
-#         print(f"[VALIDATION FAILED] {key}: {str(e)}")
+    except Exception as e:
+        print(f"[VALIDATION FAILED] {key}: {str(e)}")
 
-#         # Quarantine the file
-#         if quarantine_bucket and quarantine_prefix:
-#             quarantine_key = f"{quarantine_prefix.rstrip('/')}/{os.path.basename(key)}"
-#             print(f"Quarantining to {quarantine_bucket}/{quarantine_key}")
-#             s3_client.copy_object(
-#                 Bucket=quarantine_bucket,
-#                 CopySource={"Bucket": bucket, "Key": key},
-#                 Key=quarantine_key,
-#             )
-#         else:
-#             print("Quarantine location not configured — skipping quarantine")
+        # Quarantine the file
+        if quarantine_bucket and quarantine_prefix:
+            quarantine_key = f"{quarantine_prefix.rstrip('/')}/{os.path.basename(key)}"
+            print(f"Quarantining to {quarantine_bucket}/{quarantine_key}")
+            s3_client.copy_object(
+                Bucket=quarantine_bucket,
+                CopySource={"Bucket": bucket, "Key": key},
+                Key=quarantine_key,
+            )
+        else:
+            print("Quarantine location not configured — skipping quarantine")
 
-#         return False
+        return False
 
 
 def lambda_handler(event, context):
