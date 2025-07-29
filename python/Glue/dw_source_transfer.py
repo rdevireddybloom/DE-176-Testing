@@ -4,7 +4,6 @@ import psycopg2
 import json
 import boto3
 import pandas as pd
-import pymssql
 import sqlalchemy as sa
 import csv
 import logging
@@ -13,6 +12,8 @@ from awsglue.utils import getResolvedOptions
 
 
 logger = logging.getLogger()
+print(f"Logger name: {logger.name}")
+# Set the logging level to INFO to capture all messages
 logger.setLevel(logging.INFO)
 # Create a StreamHandler to output to stdout
 handler = logging.StreamHandler(sys.stdout)
