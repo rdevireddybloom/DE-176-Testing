@@ -80,9 +80,9 @@ def file_delivery_handler(file_obj, config=None):
         )
         return
 
-    # if not should_deliver_now(config):
-    #     print(f"Skipping delivery for now: {config['extract_config_id']}")
-    #     return
+    if not should_deliver_now(config):
+        print(f"Skipping delivery for now: {config['extract_config_id']}")
+        return
 
     if config.get("include_header_flag"):
         if not validate_file_header(bucket, key, config):
