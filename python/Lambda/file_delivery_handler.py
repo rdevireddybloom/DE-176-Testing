@@ -92,6 +92,14 @@ def file_delivery_handler(file_obj, config=None):
             )
             return
 
+    print(f"Processing file {file_name} for delivery")
+    delivery_context = extract_metadata_from_key(file_name)
+    if config.get("include_header_flag"):
+        key, row_count = remove_header_if_needed(bucket, key, config)
+        print(f"File {file_name} processed. New key: {key}, Row count: {row_count}")
+    else:
+        row_count = None
+
     try:
         if config["deliver_type"] == "S3":
             deliver_to_s3(bucket, key, config)

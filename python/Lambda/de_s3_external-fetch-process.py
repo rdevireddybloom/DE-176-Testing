@@ -590,6 +590,12 @@ def lambda_handler(event, context):
             # Step 7: Handle FTP file fetch
             # For FTP, we don't delete files after processing
             elif fetch_type.upper() == "FTP":
+                print(f"Fetching files from FTP: {location}")
+                logger.debug(f"Fetching files from FTP: {location}")
+                # Fetch files from the FTP server
+                logger.debug(f"Using credentials: {creds}")
+                print(f"Using credentials: {creds}")
+                # Fetch files from the FTP server
                 ftp_files = fetch_from_ftp(creds, location)
                 for file_name, file_data in ftp_files:
                     process_and_upload(
