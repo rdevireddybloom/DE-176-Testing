@@ -7,13 +7,10 @@ import sqlalchemy as sa
 import csv
 import logging
 
-# Initialize logging
-# Get the root logger
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # Set the minimum logging level
 
-# Create a StreamHandler to output to stdout
-# This is demonstration of logging.  Remove or comment out in production.
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
 
@@ -21,8 +18,7 @@ handler.setLevel(logging.INFO)
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 
-# This is demonstration of logging.  Remove or comment out in production.
-# Add the handler to the logger
+
 logger.addHandler(handler)
 
 # Few variable initializations

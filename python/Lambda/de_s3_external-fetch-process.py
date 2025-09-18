@@ -17,9 +17,6 @@ import datetime
 from botocore.exceptions import ClientError
 from de_aws_utils.logging.cloudwatchsnslogger import CloudWatchSNSLogger
 
-# ------------------ Logger Setup ------------------
-# logger = logging.getLogger()
-# logger.setLevel(logging.INFO)
 
 aws_region = os.environ.get("REGION", "us-west-2")
 do_secret_name = os.environ.get("DO_SECRET_NAME", "etluser/dev/rds")
