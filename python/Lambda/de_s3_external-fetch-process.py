@@ -40,8 +40,6 @@ SECRETS_MANAGER = boto3.client("secretsmanager", region_name=aws_region)
 # ------------------ Helper Functions ------------------
 
 
-# This function retrieves a secret from AWS Secrets Manager.
-# The secret usually contains credentials like usernames and passwords.
 def get_secret(secret_name):
     try:
         # Request the secret value using the secret name provided
