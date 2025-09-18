@@ -25,15 +25,6 @@ env = os.environ.get("ENV", "Dev")
 job_name = os.environ.get("JOB_NAME", "Internal-Fetch-Process")
 job_class = os.environ.get("JOB_CLASS", "Testing")
 
-# sns_info_topic_arn = os.environ.get(
-#     "SNS_TOPIC_ARN", "arn:aws:sns:us-west-2:511539536780:Dev-Testing-Info"
-# )
-# sns_warn_topic_arn = os.environ.get(
-#     "SNS_WARN_TOPIC_ARN", "arn:aws:sns:us-west-2:511539536780:Dev-Testing-Warn"
-# )
-# sns_error_topic_arn = os.environ.get(
-#     "SNS_ERROR_TOPIC_ARN", "arn:aws:sns:us-west-2:511539536780:Dev-Testing-Error"
-# )
 
 # logger = CloudWatchSNSLogger(name=job_name, region=aws_region)
 logger = CloudWatchSNSLogger()

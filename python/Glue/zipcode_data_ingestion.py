@@ -10,13 +10,6 @@ import json
 from CloudWatchSNSLogger import CloudWatchSNSLogger
 
 
-# Global AWS clients
-# region_name = os.environ.get("AWS_REGION", "us-east-1")
-# s3 = boto3.client("s3", region_name=region_name)
-# sns_client = boto3.client("sns", region_name=region_name)
-# secrets_client = boto3.client("secretsmanager", region_name=region_name)
-
-
 def retrieve_secrets(secret_name: str) -> dict:
     """Retrieve secrets from AWS Secrets Manager.
     Returns a dictionary with the secret values."""
