@@ -60,10 +60,6 @@ def get_db_secrets(secret_name, aws_region):
         logger.exception(f"Error retrieving secrets for {secret_name}: {str(e)}")
         raise
         # Uncomment the following lines if you want to return an error response instead of raising an exception
-        # return {
-        #     "statusCode": 500,
-        #     "body": json.dumps({"error": str(e)}),
-        # }
 
 
 def get_db_connection(secret_json):
