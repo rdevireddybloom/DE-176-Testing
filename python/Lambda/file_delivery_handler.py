@@ -21,7 +21,7 @@ aws_region = os.getenv("AWS_REGION", "us-west-2")
 SECRETS_MANAGER = boto3.client("secretsmanager", region_name=aws_region)
 print(f"Using Secrets Manager in region: {aws_region}")
 
-
+print(f"Using Secrets Manager in region: {aws_region}")
 def get_secret(secret_name):
     try:
         response = SECRETS_MANAGER.get_secret_value(SecretId=secret_name)
